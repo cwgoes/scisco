@@ -1,0 +1,91 @@
+name:                scisco
+version:             0.1.0.0
+synopsis:            A privacy-preserving, auditable, distributed voting system.
+homepage:            https://github.com/cwgoes/scisco
+author:              Christopher Goes
+maintainer:          cwgoes@protonmail.ch
+copyright:           2017 Christopher Goes
+category:            Web
+build-type:          Custom
+cabal-version:       >=1.10
+extra-source-files:  README.md
+  
+custom-setup
+  setup-depends: base, Cabal, proto-lens-protoc
+
+executable scisco
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  default-language:    Haskell2010
+  default-extensions:  DeriveGeneric
+                     , StandaloneDeriving
+                     , OverloadedStrings
+                     , NoImplicitPrelude
+                     , UnicodeSyntax
+                     , ScopedTypeVariables
+                     , EmptyDataDecls
+                     , GeneralizedNewtypeDeriving
+                     , MultiParamTypeClasses
+                     , FunctionalDependencies
+                     , RankNTypes
+                     , NoMonomorphismRestriction
+                     , FlexibleContexts
+                     , FlexibleInstances
+                     , LambdaCase
+  build-depends:       base >= 4.7 && < 5
+                     , proto-lens
+                     , proto-lens-arbitrary
+                     , proto-lens-protoc
+                     , bytestring
+                     , foundation
+                     , scisco
+  ghc-options:       -j4 -ferror-spans -Wall -fno-warn-orphans -fno-warn-name-shadowing -fno-warn-type-defaults -threaded -rtsopts -O3
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     ABCI.Server
+                       Scisco.Core
+  other-modules:       Examples.Counter
+                       Scisco.Consensus
+                       Scisco.LRS
+                       Scisco.Types
+                       Proto.Types
+  default-language:    Haskell2010
+  default-extensions:  DeriveGeneric
+                     , StandaloneDeriving
+                     , OverloadedStrings
+                     , NoImplicitPrelude
+                     , UnicodeSyntax
+                     , ScopedTypeVariables
+                     , EmptyDataDecls
+                     , GeneralizedNewtypeDeriving
+                     , MultiParamTypeClasses
+                     , FunctionalDependencies
+                     , RankNTypes
+                     , NoMonomorphismRestriction
+                     , FlexibleContexts
+                     , FlexibleInstances
+                     , LambdaCase
+  build-depends:       base >= 4.7 && < 5
+                     , foundation
+                     , bytestring
+                     , proto-lens
+                     , proto-lens-arbitrary
+                     , proto-lens-protoc
+                     , lens
+                     , text
+                     , conduit
+                     , conduit-extra
+                     , conduit-combinators
+                     , network-conduit
+                     , binary
+                     , cryptonite
+                     , unordered-containers
+                     , containers
+                     , aeson
+                     , bimap
+                     , vector
+                     , mtl
+                     , hashable
+                     , random
+  ghc-options:       -j4 -ferror-spans -Wall -fno-warn-orphans -fno-warn-name-shadowing -fno-warn-type-defaults -O3

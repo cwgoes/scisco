@@ -1,0 +1,7 @@
+flags: {}
+extra-package-dbs: []
+packages:
+- .
+extra-deps:
+- network-conduit-1.1.0
+resolver: lts-8.21
