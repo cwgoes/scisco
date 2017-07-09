@@ -13,7 +13,7 @@ export default class HomePage extends React.Component {
   }
 
   handleOverview() {
-    window.open('https://github.com/cwgoes/scisco/README.md');
+    window.open('https://github.com/cwgoes/scisco/blob/master/README.md');
   }
 
   viewElections() {

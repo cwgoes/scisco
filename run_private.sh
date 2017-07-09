@@ -21,6 +21,5 @@ echo " OK"
 echo -n "Launching Tendermint..."
 
 tendermint init
-cp genesis.json ~/.tendermint/genesis.json
 tendermint unsafe_reset_all
-tendermint node --p2p.seeds=158.69.63.13:46656
+tendermint node

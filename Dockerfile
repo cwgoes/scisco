@@ -12,10 +12,12 @@ RUN cd /usr/bin && wget -c https://s3-us-west-2.amazonaws.com/tendermint/binarie
 
 WORKDIR /scisco
 
-ADD Setup.hs      /scisco
-ADD stack.yaml    /scisco
-ADD scisco.cabal  /scisco
-ADD run.sh        /scisco
+ADD Setup.hs        /scisco
+ADD stack.yaml      /scisco
+ADD scisco.cabal    /scisco
+ADD run.sh          /scisco
+ADD run_private.sh  /scisco
+ADD genesis.json    /scisco
 
 ADD www           /scisco/www
 

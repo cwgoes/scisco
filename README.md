@@ -23,7 +23,7 @@ This is experimental software, written quickly as a demonstrative proof-of-conce
 
 # Demonstration
 
-The easiest way to test Scisco is by starting a local testnet, on which you may view, start, and participate in elections.
+The easiest way to test Scisco is by starting the testnet, on which you may view, start, and participate in elections.
 
 Simply download the [autobuilt Docker image](https://hub.docker.com/r/cgoes/scisco):
 
@@ -31,7 +31,15 @@ Simply download the [autobuilt Docker image](https://hub.docker.com/r/cgoes/scis
 docker run -d --net=host cgoes/scisco
 ```
 
-Launching Scisco and Tendermint should take about fifteen seconds. After completion, open your web browser to [http://localhost:3000](http://localhost:3000) and play around!
+The Docker image will automatically connect to the testnet. Launching Scisco and Tendermint should take about fifteen seconds. Syncing the blockchain may take a few minutes.
+
+If you would instead prefer to run a local private testnet, instead run:
+
+```
+docker run -d --net=host cgoes/scisco /scisco/run_private.sh
+```
+
+After completion, on whichever network, open your web browser to [http://localhost:3000](http://localhost:3000) and play around!
 
 # Implementation Overview
 
