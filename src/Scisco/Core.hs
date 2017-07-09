@@ -1,20 +1,30 @@
-module Scisco.Core where
+module Scisco.Core (load, handle, serve) where
 
 import           Control.Concurrent
 import           Control.Lens
+import           Control.Monad.Trans
 import qualified Crypto.Hash                as C
 import qualified Crypto.PubKey.ECC.ECDSA    as C
 import qualified Crypto.PubKey.ECC.Generate as C
 import qualified Data.Aeson                 as A
+import qualified Data.Bimap                 as BM
 import qualified Data.Binary                as B
+import qualified Data.ByteString.Base16     as B16
 import qualified Data.ByteString.Char8      as B
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.HashMap.Strict        as M
+import           Data.List                  (map)
 import qualified Data.Text                  as T
+import qualified Data.Vector                as V
 import           Foundation
+import qualified Network.HTTP.Types         as S
 import qualified Prelude
+import qualified Web.Spock                  as S
+import qualified Web.Spock.Config           as S
 
 import           Proto.Types
+import           Scisco.Consensus           (encodeToSign, opaqueDecode,
+                                             opaqueEncode, sign)
 import qualified Scisco.Consensus           as Consensus
 import qualified Scisco.LRS                 as LRS
 import           Scisco.Types
@@ -50,40 +60,88 @@ load = do
   state ← return $ State 0 M.empty
   newMVar state
 
+serve ∷ IO ()
+serve = do
+  cfg ← S.defaultSpockCfg () S.PCNoDatabase ()
+  S.runSpock 8080 $ S.spock cfg app
+
+app ∷ S.SpockM () () () ()
+app = do
+
+  let crossOrigin = do
+        S.setHeader "Access-Control-Allow-Origin" "*"
+        S.setHeader "Access-Control-Allow-Methods" "GET, POST, HEAD, OPTIONS"
+
+  S.get ("aux" S.<//> "ecc" S.<//> "keys" S.<//> "generate") $ do
+    (C.PublicKey _ pub, C.PrivateKey _ pri) ← liftIO $ C.generate curve
+    crossOrigin
+    S.json $ A.Object $ M.fromList [("public", A.toJSON $ opaqueEncode pub), ("private", A.toJSON $ opaqueEncode pri)]
+
+  S.post ("aux" S.<//> "ecc" S.<//> "accept") $ do
+    body ← S.body
+    crossOrigin
+    case A.decodeStrict body of
+      Just (election ∷ T.Text, which ∷ T.Text, pubkey' ∷ T.Text, privkey' ∷ T.Text) → do
+        let pubkey  = opaqueDecode pubkey'
+            privkey = opaqueDecode privkey'
+        sig ← liftIO $ sign privkey $ encodeToSign (election, which, pubkey ∷ C.PublicPoint)
+        S.json $ opaqueEncode sig
+      Nothing → do
+        S.setStatus $ S.Status 400 "Bad Request"
+
+  S.post ("aux" S.<//> "ecc" S.<//> "reject") $ do
+    body ← S.body
+    crossOrigin
+    case A.decodeStrict body of
+      Just (election ∷ T.Text, which ∷ T.Text, pubkey' ∷ T.Text, reason ∷ T.Text, privkey' ∷ T.Text) → do
+        let pubkey  = opaqueDecode pubkey'
+            privkey = opaqueDecode privkey'
+        sig ← liftIO $ sign privkey $ encodeToSign (election, which, pubkey ∷ C.PublicPoint, reason ∷ T.Text)
+        S.json $ opaqueEncode sig
+      Nothing → do
+        S.setStatus $ S.Status 400 "Bad Request"
+
+  S.get ("aux" S.<//> "lrs" S.<//> "keys" S.<//> "generate") $ do
+    (pub, pri) ← liftIO LRS.genKeypair
+    crossOrigin
+    S.json $ A.Object $ M.fromList [("public", A.toJSON $ opaqueEncode pub), ("private", A.toJSON $ opaqueEncode pri)]
+
+  S.post ("aux" S.<//> "lrs" S.<//> "votes" S.<//> "sign") $ do
+    body ← S.body
+    crossOrigin
+    case A.decodeStrict body of
+      Just (ring' ∷ V.Vector T.Text, keypair' ∷ T.Text, election ∷ T.Text, candidatePubKey' ∷ T.Text) → do
+        let ring = V.map opaqueDecode ring'
+            keypair = opaqueDecode keypair'
+            candidatePubKey = opaqueDecode candidatePubKey'
+        sig ← liftIO $ LRS.sign ring keypair $ BL.toStrict $ B.encode (election ∷ T.Text, "castVote" ∷ B.ByteString, candidatePubKey ∷ C.PublicPoint)
+        S.json $ opaqueEncode sig
+      Nothing → do
+        S.setStatus $ S.Status 400 "Bad Request"
+
 handleQuery ∷ MVar State → RequestQuery → IO ResponseQuery
-handleQuery state (RequestQuery dta path height _) =
+handleQuery state (RequestQuery _ path _ _) = do
   case T.split ((==) '/') path of
     ["state", "elections"] → do
       state ← readMVar state
-      return $ ResponseQuery OK 0 B.empty (BL.toStrict $ A.encode $ M.keys $ stateElections state) B.empty (fromIntegral $ stateLastBlockHeight state) T.empty
-    ["state", "elections", name] → do
-      state ← readMVar state
-      case M.lookup name $ stateElections state of
-        Just e  → do
-          return $ ResponseQuery OK 0 B.empty (BL.toStrict $ A.encode e) B.empty (fromIntegral $ stateLastBlockHeight state) T.empty
-        Nothing → return $ ResponseQuery InternalError 0 B.empty B.empty B.empty 0 T.empty
-    ["p2p", "filter", "pubkey", _]  → return $ ResponseQuery OK 0 B.empty B.empty B.empty height T.empty
-    ["p2p", "filter", "addr", _]    → return $ ResponseQuery OK 0 B.empty B.empty B.empty height T.empty
-
-    -- Not really "state" queries; these could be moved into a separate server (or done client-side), but convenient for now.
-
-    ["aux", "ecc", "keys", "generate"] → do
-      state ← readMVar state
-      (C.PublicKey _ pub, C.PrivateKey _ pri) ← C.generate curve
-      return $ ResponseQuery OK 0 B.empty (BL.toStrict $ A.encode (pub, pri)) B.empty (fromIntegral $ stateLastBlockHeight state) T.empty
-
-    ["aux", "lrs", "keys", "generate"] → do
-      state ← readMVar state
-      keypair ← LRS.genKeypair
-      return $ ResponseQuery OK 0 B.empty (BL.toStrict $ A.encode keypair) B.empty (fromIntegral $ stateLastBlockHeight state) T.empty
-    ["aux", "lrs", "votes", "sign"] → do
-      case A.decodeStrict dta of
-        Just (ring, keypair, election, candidatePubKey) → do
-          state ← readMVar state
-          sig ← LRS.sign ring keypair $ BL.toStrict $ B.encode (election ∷ T.Text, "castVote" ∷ B.ByteString, candidatePubKey ∷ C.PublicPoint)
-          return $ ResponseQuery OK 0 B.empty (BL.toStrict $ A.encode sig) B.empty (fromIntegral $ stateLastBlockHeight state) T.empty
-        Nothing ->
-          return $ ResponseQuery EncodingError 0 B.empty B.empty B.empty 0 T.empty
+      let result =
+            M.map (\e → A.Object $ M.fromList [
+            ("authorityPubKey", A.toJSON $ opaqueEncode $ electionAuthorityPubKey e),
+            ("transitionBlocks", A.toJSON $ electionTransitionBlocks e),
+            ("stage", A.toJSON $ electionStage e),
+            ("pendingCandidates", A.toJSON $ BM.map opaqueEncode $ electionPendingCandidates e),
+            ("pendingVoters", A.toJSON $ BM.map opaqueEncode $ electionPendingVoters e),
+            ("acceptedCandidates", A.toJSON $ BM.map opaqueEncode $ electionAcceptedCandidates e),
+            ("acceptedVoters", A.toJSON $ BM.map opaqueEncode $ electionAcceptedVoters e),
+            ("rejectedCandidates", A.toJSON $ map (\(k, v) → (opaqueEncode k, v)) $ M.toList $ electionRejectedCandidates e),
+            ("rejectedVoters", A.toJSON $ map (\(k, v) → (opaqueEncode k, v)) $ M.toList $ electionRejectedVoters e),
+            ("voterRing", A.toJSON $ V.map opaqueEncode $ electionVoterRing e),
+            ("ballotSignatures", A.toJSON $ V.map opaqueEncode $ electionBallotSignatures e),
+            ("votes", A.toJSON $ map (\(k, v) → (opaqueEncode k, v)) $ M.toList $ electionVotes e)
+            ]) $ stateElections state
+      return $ ResponseQuery OK 0 B.empty (BL.toStrict $ A.encode result) B.empty 0 T.empty
+    ["p2p", "filter", "pubkey", _]  → return $ ResponseQuery OK 0 B.empty B.empty B.empty 0 T.empty
+    ["p2p", "filter", "addr", _]    → return $ ResponseQuery OK 0 B.empty B.empty B.empty 0 T.empty
     _                               → return $ ResponseQuery UnknownRequest 0 B.empty B.empty B.empty 0 unknown
 
 handleInfo ∷ MVar State → RequestInfo → IO ResponseInfo
@@ -112,7 +170,8 @@ handleBeginBlock ∷ RequestBeginBlock → IO ResponseBeginBlock
 handleBeginBlock _ = return ResponseBeginBlock
 
 handleDeliverTx ∷ MVar State → RequestDeliverTx → IO ResponseDeliverTx
-handleDeliverTx state (RequestDeliverTx tx) = do
+handleDeliverTx state (RequestDeliverTx tx') = do
+  let (tx, _) = B16.decode tx'
   case A.decodeStrict tx of
     Nothing ->
       return $ ResponseDeliverTx EncodingError B.empty undecodable
@@ -123,7 +182,8 @@ handleDeliverTx state (RequestDeliverTx tx) = do
           Left err      → return (state,   ResponseDeliverTx BadNonce B.empty $ "consensus_violation - " `T.append` (T.pack $ Prelude.show err))
 
 handleCheckTx ∷ MVar State → RequestCheckTx → IO ResponseCheckTx
-handleCheckTx state (RequestCheckTx tx) = do
+handleCheckTx state (RequestCheckTx tx') = do
+  let (tx, _) = B16.decode tx'
   case A.decodeStrict tx of
     Nothing ->
       return $ ResponseCheckTx EncodingError B.empty undecodable

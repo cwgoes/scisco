@@ -1,18 +1,30 @@
-module Scisco.Consensus (apply) where
+module Scisco.Consensus (apply, opaqueEncode, opaqueDecode, encodeToSign, sign) where
 
 import           Control.Monad.Except
 import qualified Crypto.PubKey.ECC.ECDSA as C
 import qualified Data.Bimap              as BM
 import qualified Data.Binary             as B
 import qualified Data.ByteString         as B
+import qualified Data.ByteString.Base64  as B64
 import qualified Data.ByteString.Lazy    as BL
 import qualified Data.HashMap.Strict     as M
+import           Data.Maybe
+import qualified Data.Text               as T
+import qualified Data.Text.Encoding      as T
 import qualified Data.Vector             as V
 import           Foundation
 import           Prelude                 (map)
 
 import qualified Scisco.LRS              as LRS
 import           Scisco.Types
+
+-- Browser-side JSON encoding screws up large integers, so we use opaque base64 encodings.
+
+opaqueEncode ∷ (B.Binary a) ⇒ a → T.Text
+opaqueEncode = T.decodeUtf8 . B64.encode . BL.toStrict. B.encode
+
+opaqueDecode ∷ (B.Binary a) ⇒ T.Text → a
+opaqueDecode = B.decode . BL.fromStrict . (\(Right x) → x) . B64.decode . T.encodeUtf8
 
 apply ∷ (MonadError ApplyError m) ⇒ State → Transaction → m State
 apply state tx = do
@@ -21,7 +33,8 @@ apply state tx = do
 
   case tx of
 
-    StartElection name pubKey transitionBlocks ->
+    StartElection name pubKey' transitionBlocks → do
+      let pubKey = opaqueDecode pubKey'
       case M.lookup name elections of
         -- Consensus rule: all elections must be unique by name.
         Just _  → throwError DuplicateElection
@@ -40,7 +53,8 @@ apply state tx = do
               return $ state { stateElections = M.adjust (\e → e { electionStage = Finished }) name elections }
             _ → throwError InvalidTransition
 
-    RegisterAsCandidate name candidateName candidatePubKey → do
+    RegisterAsCandidate name candidateName candidatePubKey' → do
+      let candidatePubKey = opaqueDecode candidatePubKey'
       case M.lookup name elections of
         Nothing → throwError ElectionNotFound
         Just e  → do
@@ -53,7 +67,9 @@ apply state tx = do
           when (BM.member candidatePubKey pending) $ throwError DuplicatePubKey
           return $ state { stateElections = M.adjust (\e → e { electionPendingCandidates = BM.insert candidatePubKey candidateName pending }) name elections }
 
-    RegisterAsVoter name voterName voterPubKey lrsPubKey → do
+    RegisterAsVoter name voterName voterPubKey' lrsPubKey' → do
+      let voterPubKey = opaqueDecode voterPubKey'
+          lrsPubKey = opaqueDecode lrsPubKey'
       case M.lookup name elections of
         Nothing → throwError ElectionNotFound
         Just e  → do
@@ -66,7 +82,9 @@ apply state tx = do
           when (BM.member voterPubKey pending) $ throwError DuplicatePubKey
           return $ state { stateElections = M.adjust (\e → e { electionPendingVoters = BM.insert voterPubKey voterName pending, electionVoterLRSPubKeys = M.insert voterPubKey lrsPubKey $ electionVoterLRSPubKeys e }) name elections }
 
-    AcceptCandidate name candidatePubKey authoritySignature → do
+    AcceptCandidate name candidatePubKey' authoritySignature' → do
+      let candidatePubKey = opaqueDecode candidatePubKey'
+          authoritySignature = opaqueDecode authoritySignature'
       case M.lookup name elections of
         Nothing → throwError ElectionNotFound
         Just e  → do
@@ -86,11 +104,13 @@ apply state tx = do
               when (M.member candidatePubKey rejected) $ throwError CandidateAlreadyRejected
               -- Consensus rule: only the authority can accept candidates.
               let authority = electionAuthorityPubKey e
-                  toSign    = encodeToSign (name, "acceptCandidate" ∷ B.ByteString, candidatePubKey)
+                  toSign    = encodeToSign (name, "acceptCandidate" ∷ B.ByteString, candidatePubKey ∷ C.PublicPoint)
               unless (verifySignature authority authoritySignature toSign) $ throwError InvalidSignature
-              return $ state { stateElections = M.adjust (\e → e { electionAcceptedCandidates = BM.insert candidatePubKey candidateName accepted }) name elections }
+              return $ state { stateElections = M.adjust (\e → e { electionAcceptedCandidates = BM.insert candidatePubKey candidateName accepted, electionPendingCandidates = BM.delete candidatePubKey pending }) name elections }
 
-    RejectCandidate name candidatePubKey authoritySignature reason → do
+    RejectCandidate name candidatePubKey' authoritySignature' reason → do
+      let candidatePubKey = opaqueDecode candidatePubKey'
+          authoritySignature = opaqueDecode authoritySignature'
       case M.lookup name elections of
         Nothing → throwError ElectionNotFound
         Just e  → do
@@ -110,11 +130,13 @@ apply state tx = do
               when (M.member candidatePubKey rejected) $ throwError CandidateAlreadyRejected
               -- Consensus rule: only the authority can reject candidates.
               let authority = electionAuthorityPubKey e
-                  toSign    = encodeToSign (name, "rejectCandidate" ∷ B.ByteString, candidatePubKey, reason)
+                  toSign    = encodeToSign (name, "rejectCandidate" ∷ B.ByteString, candidatePubKey ∷ C.PublicPoint, reason)
               unless (verifySignature authority authoritySignature toSign) $ throwError InvalidSignature
-              return $ state { stateElections = M.adjust (\e → e { electionRejectedCandidates = M.insert candidatePubKey reason rejected }) name elections }
+              return $ state { stateElections = M.adjust (\e → e { electionRejectedCandidates = M.insert candidatePubKey reason rejected, electionPendingCandidates = BM.delete candidatePubKey pending }) name elections }
 
-    AcceptVoter name voterPubKey authoritySignature → do
+    AcceptVoter name voterPubKey' authoritySignature' → do
+      let voterPubKey = opaqueDecode voterPubKey'
+          authoritySignature = opaqueDecode authoritySignature'
       case M.lookup name elections of
         Nothing → throwError ElectionNotFound
         Just e  → do
@@ -134,11 +156,13 @@ apply state tx = do
               when (M.member voterPubKey rejected) $ throwError VoterAlreadyRejected
               -- Consensus rule: only the authority can accept voters.
               let authority = electionAuthorityPubKey e
-                  toSign    = encodeToSign (name, "acceptVoter" ∷ B.ByteString, voterPubKey)
+                  toSign    = encodeToSign (name, "acceptVoter" ∷ B.ByteString, voterPubKey ∷ C.PublicPoint)
               unless (verifySignature authority authoritySignature toSign) $ throwError InvalidSignature
-              return $ state { stateElections = M.adjust (\e → e { electionAcceptedVoters = BM.insert voterPubKey voterName accepted }) name elections }
+              return $ state { stateElections = M.adjust (\e → e { electionAcceptedVoters = BM.insert voterPubKey voterName accepted, electionPendingVoters = BM.delete voterPubKey pending }) name elections }
 
-    RejectVoter name voterPubKey authoritySignature reason → do
+    RejectVoter name voterPubKey' authoritySignature' reason → do
+      let voterPubKey = opaqueDecode voterPubKey'
+          authoritySignature = opaqueDecode authoritySignature'
       case M.lookup name elections of
         Nothing → throwError ElectionNotFound
         Just e  → do
@@ -158,11 +182,13 @@ apply state tx = do
               when (M.member voterPubKey rejected) $ throwError VoterAlreadyRejected
               -- Consensus rule: only the authority can reject voters.
               let authority = electionAuthorityPubKey e
-                  toSign    = encodeToSign (name, "rejectVoter" ∷ B.ByteString, voterPubKey, reason)
+                  toSign    = encodeToSign (name, "rejectVoter" ∷ B.ByteString, voterPubKey ∷ C.PublicPoint, reason)
               unless (verifySignature authority authoritySignature toSign) $ throwError InvalidSignature
-              return $ state { stateElections = M.adjust (\e → e { electionRejectedVoters = M.insert voterPubKey reason rejected }) name elections }
+              return $ state { stateElections = M.adjust (\e → e { electionRejectedVoters = M.insert voterPubKey reason rejected, electionPendingVoters = BM.delete voterPubKey pending }) name elections }
 
-    CastBallot name signature candidatePubKey → do
+    CastBallot name signature' candidatePubKey' → do
+      let candidatePubKey = opaqueDecode candidatePubKey'
+          signature = opaqueDecode signature'
       case M.lookup name elections of
         Nothing → throwError ElectionNotFound
         Just e  → do
@@ -174,7 +200,7 @@ apply state tx = do
           when (V.any (LRS.link signature) signatures) $ throwError DuplicateSignature
           -- Consensus rule: signature must be valid.
           let ring    = electionVoterRing e
-              toSign  = encodeToSign (name, "castVote" ∷ B.ByteString, candidatePubKey)
+              toSign  = encodeToSign (name, "castVote" ∷ B.ByteString, candidatePubKey ∷ C.PublicPoint)
           unless (LRS.verify ring signature toSign) $ throwError InvalidSignature
           return $ state { stateElections = M.adjust (\e → e { electionVotes = M.insertWith ((+)) candidatePubKey 1 $ electionVotes e, electionBallotSignatures = V.cons signature $ electionBallotSignatures e }) name elections }
 
@@ -183,6 +209,9 @@ newElection pubKey transitionBlocks = Election pubKey transitionBlocks Registrat
 
 verifySignature ∷ C.PublicPoint → C.Signature → B.ByteString → Bool
 verifySignature pubKey signature msg = C.verify hashAlgorithm (C.PublicKey curve pubKey) signature msg
+
+sign ∷ C.PrivateNumber → B.ByteString → IO C.Signature
+sign privKey msg = C.sign (C.PrivateKey curve privKey) hashAlgorithm msg
 
 encodeToSign ∷ (B.Binary a) ⇒ a → B.ByteString
 encodeToSign = BL.toStrict . B.encode

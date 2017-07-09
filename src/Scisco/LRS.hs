@@ -44,10 +44,10 @@ genKeypair = do
   priv ← fmap (\x → x `mMod` q) randomInteger
   return (makePublicKey hard priv, priv)
 
-sign ∷ Ring → Keypair → B.ByteString → IO Signature
-sign ring keypair msg = do
+sign ∷ Ring → PrivateKey → B.ByteString → IO Signature
+sign ring priv msg = do
   rand ← V.replicateM (V.length ring) randomInteger
-  return $ pureSign rand hard ring keypair msg
+  return $ pureSign rand hard ring (makePublicKey hard priv, priv) msg
 
 verify ∷ Ring → Signature → B.ByteString → Bool
 verify = pureVerify hard

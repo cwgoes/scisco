@@ -73,12 +73,12 @@ decodeLength str =
   in (1 + lengthSize, fromIntegral lengthDecoded)
 
 roll ∷ [Word8] → Integer
-roll = foldr unstep 0
+roll = foldr unstep 0 . reverse
   where
     unstep b a = a `B.shiftL` 8 B..|. fromIntegral b
 
 unroll ∷ Integer → [Word8]
-unroll = unfoldr step
+unroll = reverse . unfoldr step
   where
     step 0 = Nothing
     step i = Just (fromIntegral i, i `B.shiftR` 8)

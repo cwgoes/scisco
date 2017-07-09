@@ -10,6 +10,7 @@ import qualified Data.Binary             as B
 import           Data.Char
 import qualified Data.Hashable           as H
 import qualified Data.HashMap.Strict     as M
+import           Data.List               (map)
 import qualified Data.Text               as T
 import qualified Data.Vector             as V
 import           Foundation
@@ -55,18 +56,18 @@ data Stage =
 
 data Transaction =
 
-  StartElection { startElectionName ∷ T.Text, startElectionAuthorityPubKey ∷ C.PublicPoint, startElectionTransitionBlocks ∷ (Integer, Integer) } |
+  StartElection { startElectionName ∷ T.Text, startElectionAuthorityPubKey ∷ T.Text, startElectionTransitionBlocks ∷ (Integer, Integer) } |
   Transition { transitionElectionName ∷ T.Text, transitionFromStage ∷ Stage, transitionToStage ∷ Stage } |
 
-  RegisterAsCandidate { candidateElectionName ∷ T.Text, candidateName ∷ T.Text, candidatePubKey ∷ C.PublicPoint } |
-  RegisterAsVoter     { voterElectionName ∷ T.Text, voterName ∷ T.Text, voterPubKey ∷ C.PublicPoint, voterLRSPubKey ∷ LRS.PublicKey } |
+  RegisterAsCandidate { candidateElectionName ∷ T.Text, candidateName ∷ T.Text, candidatePubKey ∷ T.Text } |
+  RegisterAsVoter     { voterElectionName ∷ T.Text, voterName ∷ T.Text, voterPubKey ∷ T.Text, voterLRSPubKey ∷ T.Text } |
 
-  AcceptCandidate { acceptCandidateElectionName ∷ T.Text, acceptCandidatePubKey ∷ C.PublicPoint, acceptCandidateSignature ∷ C.Signature } |
-  RejectCandidate { rejectCandidateElectionName ∷ T.Text, rejectCandidatePubKey ∷ C.PublicPoint, rejectCandidateSignature ∷ C.Signature, rejectCandidateReason ∷ T.Text } |
-  AcceptVoter     { acceptVoterElectionName ∷ T.Text, acceptVoterPubKey ∷ C.PublicPoint, acceptVoterSignature ∷ C.Signature } |
-  RejectVoter     { rejectVoterElectionName ∷ T.Text, rejectVoterPubKey ∷ C.PublicPoint, rejectVoterSignature ∷ C.Signature, rejectVoterReason ∷ T.Text } |
+  AcceptCandidate { acceptCandidateElectionName ∷ T.Text, acceptCandidatePubKey ∷ T.Text, acceptCandidateSignature ∷ T.Text } |
+  RejectCandidate { rejectCandidateElectionName ∷ T.Text, rejectCandidatePubKey ∷ T.Text, rejectCandidateSignature ∷ T.Text, rejectCandidateReason ∷ T.Text } |
+  AcceptVoter     { acceptVoterElectionName ∷ T.Text, acceptVoterPubKey ∷ T.Text, acceptVoterSignature ∷ T.Text } |
+  RejectVoter     { rejectVoterElectionName ∷ T.Text, rejectVoterPubKey ∷ T.Text, rejectVoterSignature ∷ T.Text, rejectVoterReason ∷ T.Text } |
 
-  CastBallot      { castBallotElectionName ∷ T.Text, castSignature ∷ LRS.Signature, castCandidate ∷ C.PublicPoint }
+  CastBallot      { castBallotElectionName ∷ T.Text, castSignature ∷ T.Text, castCandidate ∷ T.Text }
 
   deriving (Show, Eq, Generic)
 
@@ -131,6 +132,7 @@ instance (A.FromJSON a, A.FromJSON b, Ord a, Ord b) ⇒ A.FromJSON (BM.Bimap a b
 
 options ∷ A.Options
 options = A.defaultOptions {
+  A.constructorTagModifier = map toLower,
   A.fieldLabelModifier = (\x → toLower (Prelude.head x) : Prelude.tail x) . dropWhile isLower,
   A.omitNothingFields  = True,
   A.sumEncoding        = A.ObjectWithSingleField
@@ -144,15 +146,15 @@ customParseJSON = A.genericParseJSON options
 
 instance A.ToJSONKey    C.Point
 instance A.FromJSONKey  C.Point
-instance A.ToJSON   Stage
-instance A.FromJSON Stage
-instance A.ToJSON   C.PublicPoint
-instance A.FromJSON C.PublicPoint
-instance A.ToJSON   C.Signature
-instance A.FromJSON C.Signature
-instance A.ToJSON   LRS.Signature
-instance A.FromJSON LRS.Signature
-instance A.ToJSON   Election
-instance A.FromJSON Election
-instance A.ToJSON   Transaction
-instance A.FromJSON Transaction
+instance A.ToJSON   Stage where toEncoding = customToEncoding
+instance A.FromJSON Stage where parseJSON = customParseJSON
+instance A.ToJSON   C.PublicPoint where toEncoding = customToEncoding
+instance A.FromJSON C.PublicPoint where parseJSON = customParseJSON
+instance A.ToJSON   C.Signature   where toEncoding = customToEncoding
+instance A.FromJSON C.Signature   where parseJSON = customParseJSON
+instance A.ToJSON   LRS.Signature where toEncoding = customToEncoding
+instance A.FromJSON LRS.Signature where parseJSON = customParseJSON
+instance A.ToJSON   Election    where toEncoding = customToEncoding
+instance A.FromJSON Election    where parseJSON = customParseJSON
+instance A.ToJSON   Transaction where toEncoding = customToEncoding
+instance A.FromJSON Transaction where parseJSON = customParseJSON

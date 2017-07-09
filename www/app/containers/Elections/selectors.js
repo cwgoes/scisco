@@ -3,7 +3,7 @@ import { createSelector } from 'reselect';
 /**
  * Direct selector to the elections state domain
  */
-const selectElectionsDomain = () => (state) => state.get('elections');
+const selectElectionsDomain = () => (state) => state.get('global');
 
 /**
  * Other specific selectors

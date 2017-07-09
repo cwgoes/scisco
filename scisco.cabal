@@ -88,4 +88,8 @@ library
                      , mtl
                      , hashable
                      , random
+                     , Spock
+                     , base64-bytestring
+                     , base16-bytestring
+                     , http-types
   ghc-options:       -j4 -ferror-spans -Wall -fno-warn-orphans -fno-warn-name-shadowing -fno-warn-type-defaults -O3
